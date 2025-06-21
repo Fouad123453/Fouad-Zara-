@@ -4,56 +4,61 @@ import os
 
 app = Flask(__name__)
 
-VERIFY_TOKEN = os.environ.get("VERIFY_TOKEN")
+VERIFY_TOKEN = "123456"  # هذا تستعمله في إعدادات Webhook
 PAGE_ACCESS_TOKEN = os.environ.get("PAGE_ACCESS_TOKEN")
-OPENAI_API_KEY = os.environ.get("OPENAI_API_KEY")
+OPENROUTER_API_KEY = os.environ.get("OPENROUTER_API_KEY")  # ضيفو في المتغيرات على Render
 
+# الرد الذكي من OpenRouter
+def get_ai_reply(message):
+    url = "https://openrouter.ai/api/v1/chat/completions"
+    headers = {
+        "Authorization": f"Bearer {OPENROUTER_API_KEY}",
+        "Content-Type": "application/json",
+    }
+    data = {
+        "model": "openai/gpt-3.5-turbo",
+        "messages": [
+            {"role": "user", "content": message}
+        ]
+    }
+    try:
+        response = requests.post(url, headers=headers, json=data)
+        return response.json()["choices"][0]["message"]["content"]
+    except Exception as e:
+        return "⚠️ خطأ في الاتصال بـ OpenRouter"
+
+# إرسال الرد للفيسبوك
+def send_message(recipient_id, message_text):
+    url = f"https://graph.facebook.com/v16.0/me/messages?access_token={PAGE_ACCESS_TOKEN}"
+    headers = {"Content-Type": "application/json"}
+    data = {
+        "recipient": {"id": recipient_id},
+        "message": {"text": message_text}
+    }
+    requests.post(url, headers=headers, json=data)
+
+# التحقق من Webhook
 @app.route("/webhook", methods=["GET", "POST"])
 def webhook():
     if request.method == "GET":
-        # التحقق من الـ Webhook
         if request.args.get("hub.verify_token") == VERIFY_TOKEN:
             return request.args.get("hub.challenge")
-        return "الرمز غير صحيح"
+        return "رمز التحقق غير صحيح"
     
     elif request.method == "POST":
         data = request.get_json()
-        if data.get("object") == "page":
-            for entry in data.get("entry", []):
-                messaging = entry.get("messaging", [])
-                for message in messaging:
-                    sender_id = message["sender"]["id"]
-                    if "message" in message and "text" in message["message"]:
-                        user_msg = message["message"]["text"]
-                        bot_reply = ask_openai(user_msg)
-                        send_message(sender_id, bot_reply)
+        if data["object"] == "page":
+            for entry in data["entry"]:
+                for messaging_event in entry["messaging"]:
+                    if messaging_event.get("message"):
+                        sender_id = messaging_event["sender"]["id"]
+                        message_text = messaging_event["message"].get("text")
+                        if message_text:
+                            ai_reply = get_ai_reply(message_text)
+                            send_message(sender_id, ai_reply)
         return "OK", 200
 
-def ask_openai(user_input):
-    url = "https://api.openai.com/v1/chat/completions"
-    headers = {
-        "Authorization": f"Bearer {OPENAI_API_KEY}",
-        "Content-Type": "application/json"
-    }
-    payload = {
-        "model": "gpt-3.5-turbo",
-        "messages": [{"role": "user", "content": user_input}]
-    }
-    response = requests.post(url, headers=headers, json=payload)
-    if response.status_code == 200:
-        return response.json()["choices"][0]["message"]["content"].strip()
-    else:
-        return "⚠️ خطأ في الاتصال بـ OpenAI"
-
-def send_message(recipient_id, text):
-    url = f"https://graph.facebook.com/v17.0/me/messages?access_token={PAGE_ACCESS_TOKEN}"
-    payload = {
-        "recipient": {"id": recipient_id},
-        "message": {"text": text}
-    }
-    headers = {"Content-Type": "application/json"}
-    requests.post(url, headers=headers, json=payload)
-
+# تشغيل التطبيق
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 5000))
     app.run(host="0.0.0.0", port=port)
