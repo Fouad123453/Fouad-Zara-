@@ -4,28 +4,25 @@ import os
 
 app = Flask(__name__)
 
-VERIFY_TOKEN = "123456"  # رمز تحقق Webhook
+VERIFY_TOKEN = "123456"  # هذا تستعمله في إعدادات Webhook
 PAGE_ACCESS_TOKEN = os.environ.get("PAGE_ACCESS_TOKEN")
-OPENROUTER_API_KEY = os.environ.get("OPENROUTER_API_KEY")
+OPENROUTER_API_KEY = os.environ.get("OPENROUTER_API_KEY")  # ضيفو في المتغيرات على Render
 
-# الرد الذكي من OpenRouter GPT-4 Turbo
+# الرد الذكي من OpenRouter
 def get_ai_reply(message):
     url = "https://openrouter.ai/api/v1/chat/completions"
     headers = {
         "Authorization": f"Bearer {OPENROUTER_API_KEY}",
         "Content-Type": "application/json",
-        "HTTP-Referer": "https://fouad-zara-bot.onrender.com",  # بدلها برابط موقعك على Render
-        "X-Title": "Facebook Messenger AI Bot"
     }
     data = {
-        "model": "openrouter/openai/gpt-4-turbo",
+        "model": "openai/gpt-4-turbo",
         "messages": [
             {"role": "user", "content": message}
         ]
     }
     try:
         response = requests.post(url, headers=headers, json=data)
-        response.raise_for_status()
         return response.json()["choices"][0]["message"]["content"]
     except Exception as e:
         return "⚠️ خطأ في الاتصال بـ OpenRouter"
