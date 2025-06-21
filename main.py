@@ -14,7 +14,7 @@ def get_ai_reply(message):
     headers = {
         "Authorization": f"Bearer {OPENROUTER_API_KEY}",
         "Content-Type": "application/json",
-        "HTTP-Referer": "https://yourappname.onrender.com",  # بدلها برابط موقعك على Render
+        "HTTP-Referer": "https://fouad-zara-bot.onrender.com",  # بدلها برابط موقعك على Render
         "X-Title": "Facebook Messenger AI Bot"
     }
     data = {
