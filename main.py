@@ -1,49 +1,42 @@
 from flask import Flask, request
-import requests
-import os
+import os, requests
 
 app = Flask(__name__)
 
-VERIFY_TOKEN = "123456"
-PAGE_ACCESS_TOKEN = os.getenv("PAGE_ACCESS_TOKEN")
+VERIFY_TOKEN      = "123456"                          # استعمله نفسه في Meta
+PAGE_ACCESS_TOKEN = os.getenv("PAGE_ACCESS_TOKEN")    # ضعه في متغيرات Render
 
-@app.route('/')
+@app.route("/")
 def home():
-    return '✅ Facebook Messenger Bot is running!'
+    return "✅ Bot up!"
 
-@app.route('/webhook', methods=['GET', 'POST'])
+@app.route("/webhook", methods=["GET", "POST"])
 def webhook():
-    if request.method == 'GET':
+    # تحقق من Webhook (Facebook يرسل GET أول مرة)
+    if request.method == "GET":
         token = request.args.get("hub.verify_token")
         challenge = request.args.get("hub.challenge")
         if token == VERIFY_TOKEN:
             return challenge
         return "Token mismatch", 403
 
-    elif request.method == 'POST':
-        data = request.get_json()
-        for entry in data.get('entry', []):
-            for messaging_event in entry.get('messaging', []):
-                if messaging_event.get('message'):
-                    sender_id = messaging_event['sender']['id']
-                    send_message(sender_id, "✅ البوت راهو يخدم! شكرا على الرسالة 💬")
-        return "ok", 200
+    # استقبال رسائل POST
+    data = request.get_json()
+    if data and data.get("object") == "page":
+        for entry in data["entry"]:
+            for event in entry["messaging"]:
+                if "message" in event and "text" in event["message"]:
+                    sender_id = event["sender"]["id"]
+                    send_message(sender_id, "👋 مرحبا! البوت يخدم ✅")
+    return "OK", 200
 
-def send_message(recipient_id, message_text):
-    if not PAGE_ACCESS_TOKEN:
-        print("❌ PAGE_ACCESS_TOKEN ما راهوش مضيف")
-        return
-
+def send_message(recipient_id, text):
     url = f"https://graph.facebook.com/v17.0/me/messages?access_token={PAGE_ACCESS_TOKEN}"
-    headers = {"Content-Type": "application/json"}
     payload = {
         "recipient": {"id": recipient_id},
-        "message": {"text": message_text}
+        "message":   {"text": text}
     }
+    requests.post(url, json=payload)
 
-    response = requests.post(url, headers=headers, json=payload)
-    if response.status_code != 200:
-        print("❌ فشل في إرسال الرسالة:", response.text)
-
-if __name__ == '__main__':
-    app.run()
+if __name__ == "__main__":
+    app.run(host="0.0.0.0", port=5000)
