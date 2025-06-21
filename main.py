@@ -16,7 +16,7 @@ def get_ai_reply(message):
         "Content-Type": "application/json",
     }
     data = {
-        "model": "openai/gpt-4-turbo",
+        "model": "openai/gpt-3.5-turbo",
         "messages": [
             {"role": "user", "content": message}
         ]
