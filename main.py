@@ -6,14 +6,13 @@ app = Flask(__name__)
 
 VERIFY_TOKEN = "123456"
 PAGE_ACCESS_TOKEN = os.environ.get("PAGE_ACCESS_TOKEN")
-OPENROUTER_API_KEY = os.environ.get("OPENROUTER_API_KEY")
+GROQ_API_KEY = os.environ.get("GROQ_API_KEY")
 
-# نخزن المحادثة وحالة الأسلوب لكل مستخدم
+# نخزن المحادثات وإعدادات كل مستخدم
 user_histories = {}
 user_states = {}
 
 def update_user_state(sender_id, message):
-    """تحليل الرسالة وتحديث إعدادات المستخدم"""
     lowered = message.lower()
     state = user_states.get(sender_id, {"emojis": True, "style": "natural"})
 
@@ -30,38 +29,34 @@ def update_user_state(sender_id, message):
     return state
 
 def build_system_prompt(state):
-    """بناء برومبت ذكي حسب الحالة"""
-    base_prompt = (
-        "أنت مساعد ذكي وودود، تفهم جميع اللهجات العربية (الجزائرية، الفصحى، العامية...). "
-        "تجاوب بطريقة مفهومة، مركزة، وتحافظ على نفس الموضوع. "
-        "إذا طلب المستخدم تنفيذ أمر، حاول تنفذه أو تجاوب عليه بوضوح. "
-        "إذا كانت الرسالة فكاهية، جاوب بروح مرحة. "
-        "إذا كانت عاطفية، جاوب بتعاطف. "
-        "ردك لازم يكون طبيعي وواقعي وكأنك إنسان."
+    prompt = (
+        "أنت مساعد ذكي وودود، تفهم جميع اللهجات العربية وتجاوب بوضوح. "
+        "لا تغير الموضوع، وافهم الأوامر وطبقها مباشرة بدون تأكيد. "
+        "ردودك لازم تكون طبيعية وواقعية كأنك إنسان، وأجب حسب نوع السؤال."
     )
-
+    
     if not state["emojis"]:
-        base_prompt += " لا تستخدم الإيموجيات في الردود."
+        prompt += " لا تستخدم الإيموجيات."
     else:
-        base_prompt += " يمكن إضافة إيموجيات مناسبة فقط."
+        prompt += " أضف إيموجيات مناسبة فقط."
 
     if state["style"] == "formal":
-        base_prompt += " استخدم اللغة العربية الفصحى بشكل رسمي."
+        prompt += " استخدم اللغة العربية الفصحى بأسلوب رسمي."
+    else:
+        prompt += " جاوب بأسلوب بسيط وودي."
 
-    return base_prompt
+    return prompt
 
 def get_ai_reply(sender_id, message):
-    url = "https://openrouter.ai/api/v1/chat/completions"
+    url = "https://api.groq.com/openai/v1/chat/completions"
     headers = {
-        "Authorization": f"Bearer {OPENROUTER_API_KEY}",
-        "Content-Type": "application/json",
+        "Authorization": f"Bearer {GROQ_API_KEY}",
+        "Content-Type": "application/json"
     }
 
-    # تحديث حالة المستخدم
     state = update_user_state(sender_id, message)
     system_prompt = build_system_prompt(state)
 
-    # إعداد المحادثة
     if sender_id not in user_histories:
         user_histories[sender_id] = []
 
@@ -73,7 +68,7 @@ def get_ai_reply(sender_id, message):
     user_histories[sender_id].append({"role": "user", "content": message})
 
     data = {
-        "model": "openai/gpt-3.5-turbo",  # تقدر تبدلو بـ gpt-4-turbo إذا تحب
+        "model": "llama3-70b-8192",
         "messages": user_histories[sender_id]
     }
 
@@ -83,7 +78,7 @@ def get_ai_reply(sender_id, message):
         user_histories[sender_id].append({"role": "assistant", "content": reply})
         return reply
     except Exception as e:
-        return "⚠️ خطأ في الاتصال بـ OpenRouter"
+        return f"⚠️ خطأ في الاتصال بـ Groq: {str(e)}"
 
 def send_message(recipient_id, message_text):
     url = f"https://graph.facebook.com/v16.0/me/messages?access_token={PAGE_ACCESS_TOKEN}"
