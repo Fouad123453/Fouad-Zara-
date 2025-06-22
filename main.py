@@ -4,72 +4,30 @@ import os
 
 app = Flask(__name__)
 
-VERIFY_TOKEN = "123456"
+VERIFY_TOKEN = "123456"  # رمز تحقق Webhook
 PAGE_ACCESS_TOKEN = os.environ.get("PAGE_ACCESS_TOKEN")
-OPENROUTER_API_KEY = os.environ.get("OPENROUTER_API_KEY")
+GROQ_API_KEY = os.environ.get("GROQ_API_KEY")
 
-# نخزن المحادثة وحالة الأسلوب لكل مستخدم
+# تاريخ المحادثة لكل مستخدم
 user_histories = {}
-user_states = {}
-
-def update_user_state(sender_id, message):
-    """تحليل الرسالة وتحديث إعدادات المستخدم"""
-    lowered = message.lower()
-    state = user_states.get(sender_id, {"emojis": True, "style": "dz"})
-
-    if "حبس الايموجي" in lowered or "بدون ايموجي" in lowered:
-        state["emojis"] = False
-    elif "رجع الايموجي" in lowered or "استعمل الايموجي" in lowered:
-        state["emojis"] = True
-    elif "خلي ردودك رسمية" in lowered or "الأسلوب الرسمي" in lowered:
-        state["style"] = "formal"
-    elif "رجع الأسلوب عادي" in lowered or "تكلم جزائري" in lowered:
-        state["style"] = "dz"
-
-    user_states[sender_id] = state
-    return state
-
-def build_system_prompt(state):
-    """بناء البرومبت حسب حالة المستخدم"""
-    style_prompt = ""
-    if state["style"] == "formal":
-        style_prompt = "أجب باللغة العربية الفصحى وبشكل رسمي دون استخدام إيموجيات."
-    elif state["style"] == "dz":
-        style_prompt = "جاوب باللهجة الجزائرية بطريقة واقعية ومفهومة."
-
-    if not state["emojis"]:
-        style_prompt += " بدون استخدام الإيموجيات."
-    else:
-        style_prompt += " وأضف بعض الإيموجيات المناسبة."
-
-    return f"أنت مساعد ذكي. {style_prompt}"
 
 def get_ai_reply(sender_id, message):
-    url = "https://openrouter.ai/api/v1/chat/completions"
+    url = "https://api.groq.com/openai/v1/chat/completions"
     headers = {
-        "Authorization": f"Bearer {OPENROUTER_API_KEY}",
-        "Content-Type": "application/json",
+        "Authorization": f"Bearer {GROQ_API_KEY}",
+        "Content-Type": "application/json"
     }
 
-    # تحليل وتحديث حالة المستخدم
-    state = update_user_state(sender_id, message)
-    system_prompt = build_system_prompt(state)
-
-    # إنشاء تاريخ المحادثة
+    # بداية المحادثة مع تعليمات للبوت
     if sender_id not in user_histories:
-        user_histories[sender_id] = []
+        user_histories[sender_id] = [
+            {"role": "system", "content": "أنت مساعد ذكي يتحدث بالدارجة الجزائرية. جاوب بذكاء وحافظ على الموضوع بدون ما تبدلو، ورد بإيموجيات كي يكون مناسب. إذا أعطاك المستخدم أمر، حاول تنفذو أو تجاوب عليه مباشرة بوضوح وبأسلوب بشري."}
+        ]
 
-    # تحديث أو إدراج system message
-    if not any(msg["role"] == "system" for msg in user_histories[sender_id]):
-        user_histories[sender_id].insert(0, {"role": "system", "content": system_prompt})
-    else:
-        user_histories[sender_id][0]["content"] = system_prompt
-
-    # إضافة رسالة المستخدم
     user_histories[sender_id].append({"role": "user", "content": message})
 
     data = {
-        "model": "openai/gpt-3.5-turbo",
+        "model": "llama3-70b-8192",
         "messages": user_histories[sender_id]
     }
 
@@ -79,9 +37,8 @@ def get_ai_reply(sender_id, message):
         user_histories[sender_id].append({"role": "assistant", "content": reply})
         return reply
     except Exception as e:
-        return "⚠️ خطأ في الاتصال بـ OpenRouter"
+        return "⚠️ خطأ في الاتصال بـ Groq"
 
-# إرسال الرد للفيسبوك
 def send_message(recipient_id, message_text):
     url = f"https://graph.facebook.com/v16.0/me/messages?access_token={PAGE_ACCESS_TOKEN}"
     headers = {"Content-Type": "application/json"}
@@ -97,7 +54,7 @@ def webhook():
         if request.args.get("hub.verify_token") == VERIFY_TOKEN:
             return request.args.get("hub.challenge")
         return "رمز التحقق غير صحيح"
-
+    
     elif request.method == "POST":
         data = request.get_json()
         if data["object"] == "page":
