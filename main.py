@@ -8,8 +8,11 @@ VERIFY_TOKEN = "123456"
 PAGE_ACCESS_TOKEN = os.environ.get("PAGE_ACCESS_TOKEN")
 OPENROUTER_API_KEY = os.environ.get("OPENROUTER_API_KEY")
 
-# نخزنو المحادثات لكل مستخدم
 user_histories = {}
+user_personas = {}  # هذي نخزنو فيها البرومبت الديناميكي لكل مستخدم
+
+def build_system_prompt(instruction):
+    return f"أنت مساعد ذكي باللهجة الجزائرية. {instruction} جاوب بطريقة واقعية وتفاعلية وتفهم السياق مليح."
 
 def get_ai_reply(sender_id, message):
     url = "https://openrouter.ai/api/v1/chat/completions"
@@ -18,17 +21,31 @@ def get_ai_reply(sender_id, message):
         "Content-Type": "application/json",
     }
 
-    # نجيبو المحادثة السابقة
+    # إعدادات أولية
     if sender_id not in user_histories:
-        user_histories[sender_id] = [
-            {"role": "system", "content": "أنت مساعد ذكي يتحدث باللهجة الجزائرية بطريقة ودودة، ويستعمل الإيموجيات في ردوده. جاوب كأنك إنسان واقعي يفهم السياق ويطوّل في الردود باش تكون مفهومة."}
-        ]
+        user_histories[sender_id] = []
+        user_personas[sender_id] = "جاوب بإسلوب ودي وبشوش مع شوية إيموجيات."
 
-    # نزيدو الرسالة الجديدة
+    # نسمحو للمستخدم يبدل الأسلوب
+    if message.lower().startswith("غير الأسلوب إلى"):
+        style = message.replace("غير الأسلوب إلى", "").strip()
+        user_personas[sender_id] = style
+        return f"✅ تم تغيير الأسلوب إلى: {style}"
+
+    # تحديث system prompt
+    system_prompt = build_system_prompt(user_personas[sender_id])
+
+    # لو مازال ما دخلناش system role
+    if not any(m["role"] == "system" for m in user_histories[sender_id]):
+        user_histories[sender_id].insert(0, {"role": "system", "content": system_prompt})
+    else:
+        user_histories[sender_id][0]["content"] = system_prompt
+
+    # نضيف رسالة المستخدم
     user_histories[sender_id].append({"role": "user", "content": message})
 
     data = {
-        "model": "openai/gpt-3.5-turbo",  # ولا gpt-4-turbo لو تحب
+        "model": "openai/gpt-3.5-turbo",  # بدلها إلى gpt-4-turbo لو تحب
         "messages": user_histories[sender_id]
     }
 
@@ -55,7 +72,7 @@ def webhook():
         if request.args.get("hub.verify_token") == VERIFY_TOKEN:
             return request.args.get("hub.challenge")
         return "رمز التحقق غير صحيح"
-    
+
     elif request.method == "POST":
         data = request.get_json()
         if data["object"] == "page":
