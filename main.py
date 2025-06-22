@@ -8,44 +8,7 @@ VERIFY_TOKEN = "123456"
 PAGE_ACCESS_TOKEN = os.environ.get("PAGE_ACCESS_TOKEN")
 GROQ_API_KEY = os.environ.get("GROQ_API_KEY")
 
-# نخزن المحادثات وإعدادات كل مستخدم
 user_histories = {}
-user_states = {}
-
-def update_user_state(sender_id, message):
-    lowered = message.lower()
-    state = user_states.get(sender_id, {"emojis": True, "style": "natural"})
-
-    if "حبس الايموجي" in lowered or "بدون ايموجي" in lowered:
-        state["emojis"] = False
-    elif "رجع الايموجي" in lowered or "استعمل الايموجي" in lowered:
-        state["emojis"] = True
-    elif "خلي ردودك رسمية" in lowered or "الأسلوب الرسمي" in lowered:
-        state["style"] = "formal"
-    elif "رجع الأسلوب عادي" in lowered or "تكلم عادي" in lowered:
-        state["style"] = "natural"
-
-    user_states[sender_id] = state
-    return state
-
-def build_system_prompt(state):
-    prompt = (
-        "أنت مساعد ذكي وودود، تفهم جميع اللهجات العربية وتجاوب بوضوح. "
-        "لا تغير الموضوع، وافهم الأوامر وطبقها مباشرة بدون تأكيد. "
-        "ردودك لازم تكون طبيعية وواقعية كأنك إنسان، وأجب حسب نوع السؤال."
-    )
-    
-    if not state["emojis"]:
-        prompt += " لا تستخدم الإيموجيات."
-    else:
-        prompt += " أضف إيموجيات مناسبة فقط."
-
-    if state["style"] == "formal":
-        prompt += " استخدم اللغة العربية الفصحى بأسلوب رسمي."
-    else:
-        prompt += " جاوب بأسلوب بسيط وودي."
-
-    return prompt
 
 def get_ai_reply(sender_id, message):
     url = "https://api.groq.com/openai/v1/chat/completions"
@@ -54,16 +17,18 @@ def get_ai_reply(sender_id, message):
         "Content-Type": "application/json"
     }
 
-    state = update_user_state(sender_id, message)
-    system_prompt = build_system_prompt(state)
-
     if sender_id not in user_histories:
-        user_histories[sender_id] = []
-
-    if not any(msg["role"] == "system" for msg in user_histories[sender_id]):
-        user_histories[sender_id].insert(0, {"role": "system", "content": system_prompt})
-    else:
-        user_histories[sender_id][0]["content"] = system_prompt
+        user_histories[sender_id] = [
+            {
+                "role": "system",
+                "content": (
+                    "أنت مساعد ذكي وودود، تفهم اللغة العربية الفصحى والدارجة الجزائرية والانجليزية، "
+                    "وتجاوب بطريقة طبيعية وعفوية كأنك إنسان حقيقي. استعمل إيموجيات مناسبة عند الحاجة، "
+                    "وخلّي ردودك مفهومة، متنوعة، وعميقة حسب السياق، وما تكرر نفس الأسلوب. حافظ على سياق المحادثة، "
+                    "ورد على كل رسالة حسب معناها، بدون تغيير الموضوع. لا تستعمل جمل جاهزة مكررة."
+                )
+            }
+        ]
 
     user_histories[sender_id].append({"role": "user", "content": message})
 
@@ -78,7 +43,7 @@ def get_ai_reply(sender_id, message):
         user_histories[sender_id].append({"role": "assistant", "content": reply})
         return reply
     except Exception as e:
-        return f"⚠️ خطأ في الاتصال بـ Groq: {str(e)}"
+        return "⚠️ خطأ في الاتصال بـ Groq"
 
 def send_message(recipient_id, message_text):
     url = f"https://graph.facebook.com/v16.0/me/messages?access_token={PAGE_ACCESS_TOKEN}"
