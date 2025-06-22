@@ -17,7 +17,6 @@ user_histories = {}
 user_states = {}
 
 def update_user_state(sender_id, message):
-    """تحليل الرسالة وتحديث إعدادات المستخدم"""
     lowered = message.lower()
     state = user_states.get(sender_id, {"emojis": True, "style": "arabic"})
 
@@ -45,7 +44,7 @@ def build_system_prompt(state):
     elif style == "formal":
         prompt += " جاوب بلغة عربية رسمية وبدون إيموجيات."
     else:
-        prompt += " جاوب بلغة عربية فصحى ودية وقريبة للإنسان و اسمك AI GPTتم تطويرك بواسطة مطورين جزائريين."
+        prompt += " جاوب بلغة عربية فصحى ودية وقريبة للإنسان واسمك AI GPT تم تطويرك بواسطة مطورين جزائريين."
 
     if emojis:
         prompt += " استعمل الإيموجيات المناسبة حسب الحاجة."
@@ -61,7 +60,6 @@ def get_ai_reply(sender_id, message):
         "Content-Type": "application/json",
     }
 
-    # تحديث حالة المستخدم
     state = update_user_state(sender_id, message)
     system_prompt = build_system_prompt(state)
 
@@ -83,7 +81,7 @@ def get_ai_reply(sender_id, message):
         reply = response.json()["choices"][0]["message"]["content"]
         user_histories[sender_id].append({"role": "assistant", "content": reply})
         return reply
-    except Exception as e:
+    except:
         return "⚠️ خطأ في الاتصال بـ OpenRouter"
 
 def send_message(recipient_id, message_text):
@@ -95,14 +93,39 @@ def send_message(recipient_id, message_text):
     }
     requests.post(url, headers=headers, json=data)
 
-def extract_text_from_image(image_url):
+def get_smart_image_reply(sender_id):
+    """رد بشري ذكي عند استلام صورة (لأن GPT-3.5 ما يقدرش يحلل الصور)"""
+    state = user_states.get(sender_id, {"emojis": True, "style": "arabic"})
+    system_prompt = build_system_prompt(state)
+
+    message = "شخص أرسل لك صورة، لكنك لا تستطيع تحليل الصور. رد عليه برد إنساني، ودود، واطلب منه يشرح محتوى الصورة بالكلام. لا تذكر أنك روبوت."
+
+    if sender_id not in user_histories:
+        user_histories[sender_id] = [{"role": "system", "content": system_prompt}]
+    else:
+        user_histories[sender_id][0]["content"] = system_prompt
+
+    user_histories[sender_id].append({"role": "user", "content": message})
+
+    url = "https://openrouter.ai/api/v1/chat/completions"
+    headers = {
+        "Authorization": f"Bearer {OPENROUTER_API_KEY}",
+        "Content-Type": "application/json",
+    }
+
+    data = {
+        "model": MODEL,
+        "messages": user_histories[sender_id],
+        "temperature": 0.9
+    }
+
     try:
-        response = requests.get(image_url)
-        img = Image.open(BytesIO(response.content))
-        text = pytesseract.image_to_string(img, lang='ara+eng')
-        return text.strip() if text else "ما لقيتش نص واضح في الصورة."
-    except Exception as e:
-        return "⚠️ ما قدرتش نقرأ النص من الصورة."
+        response = requests.post(url, headers=headers, json=data)
+        reply = response.json()["choices"][0]["message"]["content"]
+        user_histories[sender_id].append({"role": "assistant", "content": reply})
+        return reply
+    except:
+        return "📷 معليش، ما نقدرش نحلل الصور حاليًا. جرب توصفلي الصورة بالكلام ونعاونك 😊"
 
 @app.route("/webhook", methods=["GET", "POST"])
 def webhook():
@@ -123,9 +146,7 @@ def webhook():
                         if "attachments" in messaging_event["message"]:
                             for attachment in messaging_event["message"]["attachments"]:
                                 if attachment["type"] == "image":
-                                    image_url = attachment["payload"]["url"]
-                                    text_from_image = extract_text_from_image(image_url)
-                                    ai_reply = get_ai_reply(sender_id, f"النص الموجود في الصورة: {text_from_image}")
+                                    ai_reply = get_smart_image_reply(sender_id)
                                     send_message(sender_id, ai_reply)
 
                         # 💬 معالجة النصوص
@@ -137,8 +158,7 @@ def webhook():
         return "OK", 200
 
 if __name__ == "__main__":
-    # مسار Tesseract إذا كنت في Windows (إزالة التعليق عند الحاجة)
+    # لمسار المحلي لـ Tesseract لو كنت تستعمل Windows
     # pytesseract.pytesseract.tesseract_cmd = r"C:\Program Files\Tesseract-OCR\tesseract.exe"
-    
     port = int(os.environ.get("PORT", 5000))
     app.run(host="0.0.0.0", port=port)
