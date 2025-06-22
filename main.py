@@ -8,11 +8,42 @@ VERIFY_TOKEN = "123456"
 PAGE_ACCESS_TOKEN = os.environ.get("PAGE_ACCESS_TOKEN")
 OPENROUTER_API_KEY = os.environ.get("OPENROUTER_API_KEY")
 
-# نخزن المحادثة لكل مستخدم
+# نخزن المحادثة وحالة الأسلوب لكل مستخدم
 user_histories = {}
-user_personas = {}
+user_states = {}
 
-# الرد الذكي من OpenRouter
+def update_user_state(sender_id, message):
+    """تحليل الرسالة وتحديث إعدادات المستخدم"""
+    lowered = message.lower()
+    state = user_states.get(sender_id, {"emojis": True, "style": "dz"})
+
+    if "حبس الايموجي" in lowered or "بدون ايموجي" in lowered:
+        state["emojis"] = False
+    elif "رجع الايموجي" in lowered or "استعمل الايموجي" in lowered:
+        state["emojis"] = True
+    elif "خلي ردودك رسمية" in lowered or "الأسلوب الرسمي" in lowered:
+        state["style"] = "formal"
+    elif "رجع الأسلوب عادي" in lowered or "تكلم جزائري" in lowered:
+        state["style"] = "dz"
+
+    user_states[sender_id] = state
+    return state
+
+def build_system_prompt(state):
+    """بناء البرومبت حسب حالة المستخدم"""
+    style_prompt = ""
+    if state["style"] == "formal":
+        style_prompt = "أجب باللغة العربية الفصحى وبشكل رسمي دون استخدام إيموجيات."
+    elif state["style"] == "dz":
+        style_prompt = "جاوب باللهجة الجزائرية بطريقة واقعية ومفهومة."
+
+    if not state["emojis"]:
+        style_prompt += " بدون استخدام الإيموجيات."
+    else:
+        style_prompt += " وأضف بعض الإيموجيات المناسبة."
+
+    return f"أنت مساعد ذكي. {style_prompt}"
+
 def get_ai_reply(sender_id, message):
     url = "https://openrouter.ai/api/v1/chat/completions"
     headers = {
@@ -20,35 +51,25 @@ def get_ai_reply(sender_id, message):
         "Content-Type": "application/json",
     }
 
-    # إعداد المحادثة إذا جديدة
+    # تحليل وتحديث حالة المستخدم
+    state = update_user_state(sender_id, message)
+    system_prompt = build_system_prompt(state)
+
+    # إنشاء تاريخ المحادثة
     if sender_id not in user_histories:
         user_histories[sender_id] = []
-        user_personas[sender_id] = "جاوب باللهجة الجزائرية بطريقة ودودة مع شوية إيموجيات."
 
-    # تحليل الرسالة وتغيير الأسلوب تلقائيًا
-    lowered = message.lower()
-    if "ما تردش بإيموجيات" in lowered or "بدون ايموجي" in lowered:
-        user_personas[sender_id] = "جاوب باللهجة الجزائرية بدون أي إيموجيات وبأسلوب رسمي."
-    elif "خلي الأسلوب يكون رسمي" in lowered:
-        user_personas[sender_id] = "جاوب بالعربية الفصحى وبأسلوب محترم ورسمي."
-    elif "حكيلي كأنك إنسان" in lowered:
-        user_personas[sender_id] = "جاوب وكأنك إنسان حقيقي، بطريقة مفهومة، واقعية وبها تفاعل طبيعي."
-    elif "ضحكني" in lowered or "حاول تضحكني" in lowered:
-        user_personas[sender_id] = "جاوب بطريقة مضحكة، فيها مزاح وإيموجيات مضحكة."
-
-    # تحديث system message
-    system_prompt = f"أنت مساعد ذكي. {user_personas[sender_id]}"
-
-    if not any(m["role"] == "system" for m in user_histories[sender_id]):
+    # تحديث أو إدراج system message
+    if not any(msg["role"] == "system" for msg in user_histories[sender_id]):
         user_histories[sender_id].insert(0, {"role": "system", "content": system_prompt})
     else:
         user_histories[sender_id][0]["content"] = system_prompt
 
-    # إضافة الرسالة الأخيرة
+    # إضافة رسالة المستخدم
     user_histories[sender_id].append({"role": "user", "content": message})
 
     data = {
-        "model": "openai/gpt-3.5-turbo",  # غيّرها لـ gpt-4-turbo إذا تحب
+        "model": "openai/gpt-3.5-turbo",
         "messages": user_histories[sender_id]
     }
 
@@ -70,7 +91,6 @@ def send_message(recipient_id, message_text):
     }
     requests.post(url, headers=headers, json=data)
 
-# Webhook تاع فيسبوك
 @app.route("/webhook", methods=["GET", "POST"])
 def webhook():
     if request.method == "GET":
@@ -91,7 +111,6 @@ def webhook():
                             send_message(sender_id, ai_reply)
         return "OK", 200
 
-# تشغيل التطبيق
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 5000))
     app.run(host="0.0.0.0", port=port)
