@@ -8,8 +8,43 @@ VERIFY_TOKEN = "123456"
 PAGE_ACCESS_TOKEN = os.environ.get("PAGE_ACCESS_TOKEN")
 GROQ_API_KEY = os.environ.get("GROQ_API_KEY")
 
-# تخزين المحادثات حسب كل مستخدم
+# المحادثة وحالة كل مستخدم
 user_histories = {}
+user_states = {}
+
+def update_user_state(sender_id, message):
+    """تحليل الأوامر وتحديث الحالة"""
+    lowered = message.lower()
+    state = user_states.get(sender_id, {"emojis": True, "style": "dz"})
+
+    if "حبس الايموجي" in lowered or "بدون ايموجي" in lowered:
+        state["emojis"] = False
+    elif "رجع الايموجي" in lowered or "استعمل الايموجي" in lowered:
+        state["emojis"] = True
+    elif "خلي ردودك رسمية" in lowered or "الأسلوب الرسمي" in lowered:
+        state["style"] = "formal"
+    elif "رجع الأسلوب عادي" in lowered or "تكلم جزائري" in lowered:
+        state["style"] = "dz"
+
+    user_states[sender_id] = state
+    return state
+
+def build_system_prompt(state):
+    """يبني البرومبت حسب الحالة"""
+    style_prompt = ""
+    if state["style"] == "formal":
+        style_prompt = "أجب باللغة العربية الفصحى بشكل رسمي وواضح."
+    elif state["style"] == "dz":
+        style_prompt = "جاوب باللهجة الجزائرية بطريقة واقعية وبأسلوب مفهوم."
+
+    if not state["emojis"]:
+        style_prompt += " لا تستعمل الإيموجيات."
+    else:
+        style_prompt += " استعمل بعض الإيموجيات المناسبة."
+
+    style_prompt += " حافظ على سياق الحوار، وإذا طلب المستخدم أمرًا نفّذه بدون تأكيد أو تغيير للموضوع، وكن بشري في ردودك."
+
+    return f"أنت مساعد ذكي. {style_prompt}"
 
 def get_ai_reply(sender_id, message):
     url = "https://api.groq.com/openai/v1/chat/completions"
@@ -18,25 +53,16 @@ def get_ai_reply(sender_id, message):
         "Content-Type": "application/json"
     }
 
-    # إعداد بداية المحادثة بتوجيه ذكي
-    if sender_id not in user_histories:
-        user_histories[sender_id] = [
-            {
-                "role": "system",
-                "content": """
-أنت مساعد ذكي تتحدث بالعربية الفصحى وتفهم اللهجات العربية، خاصة الدارجة الجزائرية. 
-جاوب المستخدم بطريقة ودودة، مفهومة، وذكية، واستعمل إيموجيات مناسبة إذا لزم الأمر. 
-حافظ على سياق الحديث، وما تبدلش الموضوع إذا المستخدم يكمل عليه.
-إذا طلب تنفيذ أمر، نفذه مباشرة بدون ما تطلب تأكيد.
+    state = update_user_state(sender_id, message)
+    system_prompt = build_system_prompt(state)
 
-في نهاية الإجابة، إذا الموضوع يستحق توسيع، زيد جملة ختامية بأسلوبك الخاص (متغيّرة كل مرة) تشجع المستخدم يواصل النقاش، مثل:
-- "تحب نزيدك شرح؟"
-- "نقدر نعطيك تفاصيل أكثر!"
-- "حاب تعرف أكثر؟ فقط قولي 😉"
-لكن متستعملش نفس الجمل كل مرة، صيغها بأسلوبك الذكي.
-                """
-            }
-        ]
+    if sender_id not in user_histories:
+        user_histories[sender_id] = []
+
+    if not any(msg["role"] == "system" for msg in user_histories[sender_id]):
+        user_histories[sender_id].insert(0, {"role": "system", "content": system_prompt})
+    else:
+        user_histories[sender_id][0]["content"] = system_prompt
 
     user_histories[sender_id].append({"role": "user", "content": message})
 
@@ -53,7 +79,6 @@ def get_ai_reply(sender_id, message):
     except Exception as e:
         return "⚠️ خطأ في الاتصال بـ Groq"
 
-# إرسال الرد عبر Facebook
 def send_message(recipient_id, message_text):
     url = f"https://graph.facebook.com/v16.0/me/messages?access_token={PAGE_ACCESS_TOKEN}"
     headers = {"Content-Type": "application/json"}
@@ -63,14 +88,13 @@ def send_message(recipient_id, message_text):
     }
     requests.post(url, headers=headers, json=data)
 
-# Webhook الخاص بـ Facebook
 @app.route("/webhook", methods=["GET", "POST"])
 def webhook():
     if request.method == "GET":
         if request.args.get("hub.verify_token") == VERIFY_TOKEN:
             return request.args.get("hub.challenge")
         return "رمز التحقق غير صحيح"
-    
+
     elif request.method == "POST":
         data = request.get_json()
         if data["object"] == "page":
