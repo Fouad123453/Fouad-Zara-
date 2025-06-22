@@ -1,6 +1,9 @@
 from flask import Flask, request
 import requests
 import os
+from PIL import Image
+import pytesseract
+from io import BytesIO
 
 app = Flask(__name__)
 
@@ -35,14 +38,14 @@ def update_user_state(sender_id, message):
 def build_system_prompt(state):
     style = state.get("style", "arabic")
     emojis = state.get("emojis", True)
-    
+
     prompt = "أنت مساعد ذكي يتحدث مثل الإنسان، ويستخدم اللغة العربية الفصحى أو اللهجة الجزائرية حسب السياق."
     if style == "dz":
         prompt += " جاوب باللهجة الجزائرية بأسلوب واقعي ومفهوم."
     elif style == "formal":
         prompt += " جاوب بلغة عربية رسمية وبدون إيموجيات."
     else:
-        prompt += "  جاوب بلغة عربية فصحى ودية وقريبة للإنسان واسمك AI GPT تم تطويرك بواسطة مطورين جزائريين."
+        prompt += " جاوب بلغة عربية فصحى ودية وقريبة للإنسان و اسمك AI GPTتم تطويرك بواسطة مطورين جزائريين."
 
     if emojis:
         prompt += " استعمل الإيموجيات المناسبة حسب الحاجة."
@@ -92,13 +95,22 @@ def send_message(recipient_id, message_text):
     }
     requests.post(url, headers=headers, json=data)
 
+def extract_text_from_image(image_url):
+    try:
+        response = requests.get(image_url)
+        img = Image.open(BytesIO(response.content))
+        text = pytesseract.image_to_string(img, lang='ara+eng')
+        return text.strip() if text else "ما لقيتش نص واضح في الصورة."
+    except Exception as e:
+        return "⚠️ ما قدرتش نقرأ النص من الصورة."
+
 @app.route("/webhook", methods=["GET", "POST"])
 def webhook():
     if request.method == "GET":
         if request.args.get("hub.verify_token") == VERIFY_TOKEN:
             return request.args.get("hub.challenge")
         return "رمز التحقق غير صحيح"
-    
+
     elif request.method == "POST":
         data = request.get_json()
         if data["object"] == "page":
@@ -106,12 +118,27 @@ def webhook():
                 for messaging_event in entry["messaging"]:
                     if messaging_event.get("message"):
                         sender_id = messaging_event["sender"]["id"]
-                        message_text = messaging_event["message"].get("text")
-                        if message_text:
+
+                        # 📷 معالجة الصور
+                        if "attachments" in messaging_event["message"]:
+                            for attachment in messaging_event["message"]["attachments"]:
+                                if attachment["type"] == "image":
+                                    image_url = attachment["payload"]["url"]
+                                    text_from_image = extract_text_from_image(image_url)
+                                    ai_reply = get_ai_reply(sender_id, f"النص الموجود في الصورة: {text_from_image}")
+                                    send_message(sender_id, ai_reply)
+
+                        # 💬 معالجة النصوص
+                        elif "text" in messaging_event["message"]:
+                            message_text = messaging_event["message"]["text"]
                             ai_reply = get_ai_reply(sender_id, message_text)
                             send_message(sender_id, ai_reply)
+
         return "OK", 200
 
 if __name__ == "__main__":
+    # مسار Tesseract إذا كنت في Windows (إزالة التعليق عند الحاجة)
+    # pytesseract.pytesseract.tesseract_cmd = r"C:\Program Files\Tesseract-OCR\tesseract.exe"
+    
     port = int(os.environ.get("PORT", 5000))
     app.run(host="0.0.0.0", port=port)
