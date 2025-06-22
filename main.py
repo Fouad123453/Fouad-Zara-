@@ -8,27 +8,38 @@ VERIFY_TOKEN = "123456"
 PAGE_ACCESS_TOKEN = os.environ.get("PAGE_ACCESS_TOKEN")
 OPENROUTER_API_KEY = os.environ.get("OPENROUTER_API_KEY")
 
-# الرد الذكي من OpenRouter مع system message
-def get_ai_reply(message):
+# نخزنو المحادثات لكل مستخدم
+user_histories = {}
+
+def get_ai_reply(sender_id, message):
     url = "https://openrouter.ai/api/v1/chat/completions"
     headers = {
         "Authorization": f"Bearer {OPENROUTER_API_KEY}",
         "Content-Type": "application/json",
     }
-    data = {
-        "model": "openai/gpt-3.5-turbo",
-        "messages": [
-            {"role": "system", "content": "أنت مساعد ذكي يتحدث باللهجة الجزائرية بطريقة ودودة، ويستعمل الإيموجيات في ردوده. جاوب كأنك إنسان واقعي يفهم السياق ويطوّل في الردود باش تكون مفهومة، وردودك تكون دافئة ومرتبة."},
-            {"role": "user", "content": message}
+
+    # نجيبو المحادثة السابقة
+    if sender_id not in user_histories:
+        user_histories[sender_id] = [
+            {"role": "system", "content": "أنت مساعد ذكي يتحدث باللهجة الجزائرية بطريقة ودودة، ويستعمل الإيموجيات في ردوده. جاوب كأنك إنسان واقعي يفهم السياق ويطوّل في الردود باش تكون مفهومة."}
         ]
+
+    # نزيدو الرسالة الجديدة
+    user_histories[sender_id].append({"role": "user", "content": message})
+
+    data = {
+        "model": "openai/gpt-3.5-turbo",  # ولا gpt-4-turbo لو تحب
+        "messages": user_histories[sender_id]
     }
+
     try:
         response = requests.post(url, headers=headers, json=data)
-        return response.json()["choices"][0]["message"]["content"]
+        reply = response.json()["choices"][0]["message"]["content"]
+        user_histories[sender_id].append({"role": "assistant", "content": reply})
+        return reply
     except Exception as e:
         return "⚠️ خطأ في الاتصال بـ OpenRouter"
 
-# إرسال الرد للفيسبوك
 def send_message(recipient_id, message_text):
     url = f"https://graph.facebook.com/v16.0/me/messages?access_token={PAGE_ACCESS_TOKEN}"
     headers = {"Content-Type": "application/json"}
@@ -38,7 +49,6 @@ def send_message(recipient_id, message_text):
     }
     requests.post(url, headers=headers, json=data)
 
-# التحقق من Webhook
 @app.route("/webhook", methods=["GET", "POST"])
 def webhook():
     if request.method == "GET":
@@ -55,11 +65,10 @@ def webhook():
                         sender_id = messaging_event["sender"]["id"]
                         message_text = messaging_event["message"].get("text")
                         if message_text:
-                            ai_reply = get_ai_reply(message_text)
+                            ai_reply = get_ai_reply(sender_id, message_text)
                             send_message(sender_id, ai_reply)
         return "OK", 200
 
-# تشغيل التطبيق
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 5000))
     app.run(host="0.0.0.0", port=port)
