@@ -1,52 +1,45 @@
 from flask import Flask, request
-import os, requests
+import requests
+import os
 
 app = Flask(__name__)
 
 VERIFY_TOKEN = "123456"
-PAGE_ACCESS_TOKEN = os.getenv("PAGE_ACCESS_TOKEN")
-GROQ_API_KEY = os.getenv("GROQ_API_KEY")
+PAGE_ACCESS_TOKEN = os.environ.get("PAGE_ACCESS_TOKEN")
+GROQ_API_KEY = os.environ.get("GROQ_API_KEY")
 
-# تخزين المحادثة لكل مستخدم
+# المحادثة لكل مستخدم
 user_histories = {}
 
-def get_ai_reply(user_id, message):
-    if user_id not in user_histories:
-        user_histories[user_id] = [
-            {
-                "role": "system",
-                "content": (
-                    "أنت مساعد ذكي يُجيب بالعربية الفصحى فقط، دون استخدام كلمات أجنبية، ويُراعي المشاعر الإنسانية. "
-                    "افهم الإيموجيات وتفاعل معها. جاوب بدقة، وبلغة واضحة، وابقَ ضمن نفس الموضوع كلما أمكن."
-                )
-            }
-        ]
-
-    user_histories[user_id].append({"role": "user", "content": message})
-
-    data = {
-        "model": "llama3-70b-8192",
-        "messages": user_histories[user_id]
-    }
-
+def get_ai_reply(sender_id, message):
+    url = "https://api.groq.com/openai/v1/chat/completions"
     headers = {
         "Authorization": f"Bearer {GROQ_API_KEY}",
         "Content-Type": "application/json"
     }
 
+    if sender_id not in user_histories:
+        user_histories[sender_id] = [
+            {
+                "role": "system",
+                "content": "أنت مساعد ذكي تتحدث بالعربية الفصحى بأسلوب بشري، ودود، واضح، متنوع في الردود، تحب مساعدة الناس، تفهم الرموز التعبيرية وتستخدمها أحيانًا، وترد باحترام على كل سؤال مهما كان نوعه."
+            }
+        ]
+
+    user_histories[sender_id].append({"role": "user", "content": message})
+
+    data = {
+        "model": "llama3-70b-8192",  # أو استعمل gpt-3.5-turbo لو تحب OpenAI
+        "messages": user_histories[sender_id]
+    }
+
     try:
-        response = requests.post(
-            "https://api.groq.com/openai/v1/chat/completions",
-            headers=headers,
-            json=data,
-            timeout=20
-        )
+        response = requests.post(url, headers=headers, json=data)
         reply = response.json()["choices"][0]["message"]["content"]
-        user_histories[user_id].append({"role": "assistant", "content": reply})
-        user_histories[user_id] = user_histories[user_id][-12:]  # الحفاظ على الذاكرة قصيرة
+        user_histories[sender_id].append({"role": "assistant", "content": reply})
         return reply
-    except Exception as e:
-        return "⚠️ حدث خطأ أثناء التواصل مع خدمة الذكاء الاصطناعي."
+    except Exception:
+        return "⚠️ حدث خطأ في الاتصال بالخدمة."
 
 def send_message(recipient_id, message_text):
     url = f"https://graph.facebook.com/v16.0/me/messages?access_token={PAGE_ACCESS_TOKEN}"
@@ -68,13 +61,13 @@ def webhook():
         data = request.get_json()
         if data["object"] == "page":
             for entry in data["entry"]:
-                for msg_event in entry["messaging"]:
-                    if msg_event.get("message"):
-                        sender_id = msg_event["sender"]["id"]
-                        msg_text = msg_event["message"].get("text")
-                        if msg_text:
-                            reply = get_ai_reply(sender_id, msg_text)
-                            send_message(sender_id, reply)
+                for messaging_event in entry["messaging"]:
+                    if messaging_event.get("message"):
+                        sender_id = messaging_event["sender"]["id"]
+                        message_text = messaging_event["message"].get("text")
+                        if message_text:
+                            ai_reply = get_ai_reply(sender_id, message_text)
+                            send_message(sender_id, ai_reply)
         return "OK", 200
 
 if __name__ == "__main__":
