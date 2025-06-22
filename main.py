@@ -8,12 +8,11 @@ VERIFY_TOKEN = "123456"
 PAGE_ACCESS_TOKEN = os.environ.get("PAGE_ACCESS_TOKEN")
 OPENROUTER_API_KEY = os.environ.get("OPENROUTER_API_KEY")
 
+# نخزن المحادثة لكل مستخدم
 user_histories = {}
-user_personas = {}  # هذي نخزنو فيها البرومبت الديناميكي لكل مستخدم
+user_personas = {}
 
-def build_system_prompt(instruction):
-    return f"أنت مساعد ذكي باللهجة الجزائرية. {instruction} جاوب بطريقة واقعية وتفاعلية وتفهم السياق مليح."
-
+# الرد الذكي من OpenRouter
 def get_ai_reply(sender_id, message):
     url = "https://openrouter.ai/api/v1/chat/completions"
     headers = {
@@ -21,31 +20,35 @@ def get_ai_reply(sender_id, message):
         "Content-Type": "application/json",
     }
 
-    # إعدادات أولية
+    # إعداد المحادثة إذا جديدة
     if sender_id not in user_histories:
         user_histories[sender_id] = []
-        user_personas[sender_id] = "جاوب بإسلوب ودي وبشوش مع شوية إيموجيات."
+        user_personas[sender_id] = "جاوب باللهجة الجزائرية بطريقة ودودة مع شوية إيموجيات."
 
-    # نسمحو للمستخدم يبدل الأسلوب
-    if message.lower().startswith("غير الأسلوب إلى"):
-        style = message.replace("غير الأسلوب إلى", "").strip()
-        user_personas[sender_id] = style
-        return f"✅ تم تغيير الأسلوب إلى: {style}"
+    # تحليل الرسالة وتغيير الأسلوب تلقائيًا
+    lowered = message.lower()
+    if "ما تردش بإيموجيات" in lowered or "بدون ايموجي" in lowered:
+        user_personas[sender_id] = "جاوب باللهجة الجزائرية بدون أي إيموجيات وبأسلوب رسمي."
+    elif "خلي الأسلوب يكون رسمي" in lowered:
+        user_personas[sender_id] = "جاوب بالعربية الفصحى وبأسلوب محترم ورسمي."
+    elif "حكيلي كأنك إنسان" in lowered:
+        user_personas[sender_id] = "جاوب وكأنك إنسان حقيقي، بطريقة مفهومة، واقعية وبها تفاعل طبيعي."
+    elif "ضحكني" in lowered or "حاول تضحكني" in lowered:
+        user_personas[sender_id] = "جاوب بطريقة مضحكة، فيها مزاح وإيموجيات مضحكة."
 
-    # تحديث system prompt
-    system_prompt = build_system_prompt(user_personas[sender_id])
+    # تحديث system message
+    system_prompt = f"أنت مساعد ذكي. {user_personas[sender_id]}"
 
-    # لو مازال ما دخلناش system role
     if not any(m["role"] == "system" for m in user_histories[sender_id]):
         user_histories[sender_id].insert(0, {"role": "system", "content": system_prompt})
     else:
         user_histories[sender_id][0]["content"] = system_prompt
 
-    # نضيف رسالة المستخدم
+    # إضافة الرسالة الأخيرة
     user_histories[sender_id].append({"role": "user", "content": message})
 
     data = {
-        "model": "openai/gpt-3.5-turbo",  # بدلها إلى gpt-4-turbo لو تحب
+        "model": "openai/gpt-3.5-turbo",  # غيّرها لـ gpt-4-turbo إذا تحب
         "messages": user_histories[sender_id]
     }
 
@@ -57,6 +60,7 @@ def get_ai_reply(sender_id, message):
     except Exception as e:
         return "⚠️ خطأ في الاتصال بـ OpenRouter"
 
+# إرسال الرد للفيسبوك
 def send_message(recipient_id, message_text):
     url = f"https://graph.facebook.com/v16.0/me/messages?access_token={PAGE_ACCESS_TOKEN}"
     headers = {"Content-Type": "application/json"}
@@ -66,6 +70,7 @@ def send_message(recipient_id, message_text):
     }
     requests.post(url, headers=headers, json=data)
 
+# Webhook تاع فيسبوك
 @app.route("/webhook", methods=["GET", "POST"])
 def webhook():
     if request.method == "GET":
@@ -86,6 +91,7 @@ def webhook():
                             send_message(sender_id, ai_reply)
         return "OK", 200
 
+# تشغيل التطبيق
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 5000))
     app.run(host="0.0.0.0", port=port)
