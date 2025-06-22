@@ -6,16 +6,16 @@ app = Flask(__name__)
 
 VERIFY_TOKEN = "123456"
 PAGE_ACCESS_TOKEN = os.environ.get("PAGE_ACCESS_TOKEN")
-GROQ_API_KEY = os.environ.get("GROQ_API_KEY")
+OPENROUTER_API_KEY = os.environ.get("OPENROUTER_API_KEY")
 
-# المحادثة وحالة كل مستخدم
+# نخزن المحادثة وحالة الأسلوب لكل مستخدم
 user_histories = {}
 user_states = {}
 
 def update_user_state(sender_id, message):
-    """تحليل الأوامر وتحديث الحالة"""
+    """تحليل الرسالة وتحديث إعدادات المستخدم"""
     lowered = message.lower()
-    state = user_states.get(sender_id, {"emojis": True, "style": "dz"})
+    state = user_states.get(sender_id, {"emojis": True, "style": "natural"})
 
     if "حبس الايموجي" in lowered or "بدون ايموجي" in lowered:
         state["emojis"] = False
@@ -23,39 +23,45 @@ def update_user_state(sender_id, message):
         state["emojis"] = True
     elif "خلي ردودك رسمية" in lowered or "الأسلوب الرسمي" in lowered:
         state["style"] = "formal"
-    elif "رجع الأسلوب عادي" in lowered or "تكلم جزائري" in lowered:
-        state["style"] = "dz"
+    elif "رجع الأسلوب عادي" in lowered or "تكلم عادي" in lowered:
+        state["style"] = "natural"
 
     user_states[sender_id] = state
     return state
 
 def build_system_prompt(state):
-    """يبني البرومبت حسب الحالة"""
-    style_prompt = ""
-    if state["style"] == "formal":
-        style_prompt = "أجب باللغة العربية الفصحى بشكل رسمي وواضح."
-    elif state["style"] == "dz":
-        style_prompt = "جاوب باللهجة الجزائرية بطريقة واقعية وبأسلوب مفهوم."
+    """بناء برومبت ذكي حسب الحالة"""
+    base_prompt = (
+        "أنت مساعد ذكي وودود، تفهم جميع اللهجات العربية (الجزائرية، الفصحى، العامية...). "
+        "تجاوب بطريقة مفهومة، مركزة، وتحافظ على نفس الموضوع. "
+        "إذا طلب المستخدم تنفيذ أمر، حاول تنفذه أو تجاوب عليه بوضوح. "
+        "إذا كانت الرسالة فكاهية، جاوب بروح مرحة. "
+        "إذا كانت عاطفية، جاوب بتعاطف. "
+        "ردك لازم يكون طبيعي وواقعي وكأنك إنسان."
+    )
 
     if not state["emojis"]:
-        style_prompt += " لا تستعمل الإيموجيات."
+        base_prompt += " لا تستخدم الإيموجيات في الردود."
     else:
-        style_prompt += " استعمل بعض الإيموجيات المناسبة."
+        base_prompt += " يمكن إضافة إيموجيات مناسبة فقط."
 
-    style_prompt += " حافظ على سياق الحوار، وإذا طلب المستخدم أمرًا نفّذه بدون تأكيد أو تغيير للموضوع، وكن بشري في ردودك."
+    if state["style"] == "formal":
+        base_prompt += " استخدم اللغة العربية الفصحى بشكل رسمي."
 
-    return f"أنت مساعد ذكي. {style_prompt}"
+    return base_prompt
 
 def get_ai_reply(sender_id, message):
-    url = "https://api.groq.com/openai/v1/chat/completions"
+    url = "https://openrouter.ai/api/v1/chat/completions"
     headers = {
-        "Authorization": f"Bearer {GROQ_API_KEY}",
-        "Content-Type": "application/json"
+        "Authorization": f"Bearer {OPENROUTER_API_KEY}",
+        "Content-Type": "application/json",
     }
 
+    # تحديث حالة المستخدم
     state = update_user_state(sender_id, message)
     system_prompt = build_system_prompt(state)
 
+    # إعداد المحادثة
     if sender_id not in user_histories:
         user_histories[sender_id] = []
 
@@ -67,7 +73,7 @@ def get_ai_reply(sender_id, message):
     user_histories[sender_id].append({"role": "user", "content": message})
 
     data = {
-        "model": "llama3-70b-8192",
+        "model": "openai/gpt-3.5-turbo",  # تقدر تبدلو بـ gpt-4-turbo إذا تحب
         "messages": user_histories[sender_id]
     }
 
@@ -77,7 +83,7 @@ def get_ai_reply(sender_id, message):
         user_histories[sender_id].append({"role": "assistant", "content": reply})
         return reply
     except Exception as e:
-        return "⚠️ خطأ في الاتصال بـ Groq"
+        return "⚠️ خطأ في الاتصال بـ OpenRouter"
 
 def send_message(recipient_id, message_text):
     url = f"https://graph.facebook.com/v16.0/me/messages?access_token={PAGE_ACCESS_TOKEN}"
